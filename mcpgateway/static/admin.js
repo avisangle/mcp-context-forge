@@ -4295,6 +4295,82 @@ let toolInputSchemaRegistry = null;
 /**
  * ENHANCED: Tool testing with improved race condition handling
  */
+
+function detectArrayLike(p) {
+    // Returns { isArrayLike, itemsSchema, isNullable }
+    const out = {
+        isArrayLike: false,
+        itemsSchema: undefined,
+        isNullable: false,
+    };
+    if (!p || typeof p !== "object") {
+        return out;
+    }
+
+    const t = Array.isArray(p.type) ? p.type : p.type ? [p.type] : [];
+    if (t.includes("null")) {
+        out.isNullable = true;
+    }
+    if (p.nullable === true) {
+        out.isNullable = true;
+    }
+    if (Array.isArray(p.enum) && p.enum.includes(null)) {
+        out.isNullable = true;
+    }
+    if (p.const === null) {
+        out.isNullable = true;
+    }
+
+    // A) explicit array on prop
+    if (t.includes("array")) {
+        out.isArrayLike = true;
+        out.itemsSchema = p.items;
+        return out;
+    }
+    // B) items present without explicit type
+    if (p.items) {
+        out.isArrayLike = true;
+        out.itemsSchema = p.items;
+        return out;
+    }
+
+    // C) union variants (anyOf/oneOf) detect array + null
+    const unions = []
+        .concat(Array.isArray(p.anyOf) ? p.anyOf : [])
+        .concat(Array.isArray(p.oneOf) ? p.oneOf : []);
+
+    for (const v of unions) {
+        if (!v) {
+            continue;
+        }
+        const vt = Array.isArray(v.type) ? v.type : v.type ? [v.type] : [];
+        if (vt.includes("null")) {
+            out.isNullable = true;
+        }
+        if (
+            v.nullable === true ||
+            (Array.isArray(v.enum) && v.enum.includes(null)) ||
+            v.const === null
+        ) {
+            out.isNullable = true;
+        }
+    }
+
+    for (const v of unions) {
+        if (!v) {
+            continue;
+        }
+        const vt = Array.isArray(v.type) ? v.type : v.type ? [v.type] : [];
+        if (vt.includes("array") || v.items) {
+            out.isArrayLike = true;
+            out.itemsSchema = v.items;
+            return out;
+        }
+    }
+
+    return out;
+}
+
 async function testTool(toolId) {
     try {
         console.log(`Testing tool ID: ${toolId}`);
@@ -4476,7 +4552,10 @@ async function testTool(toolId) {
                     fieldDiv.appendChild(description);
                 }
 
-                if (prop.type === "array") {
+                const { isArrayLike, itemsSchema, isNullable } =
+                    detectArrayLike(prop);
+
+                if (isArrayLike) {
                     const arrayContainer = document.createElement("div");
                     arrayContainer.className = "space-y-2";
 
@@ -4484,12 +4563,13 @@ async function testTool(toolId) {
                         const wrapper = document.createElement("div");
                         wrapper.className = "flex items-center space-x-2";
 
-                        const itemTypes = Array.isArray(prop.items?.anyOf)
-                            ? prop.items.anyOf.map((t) => t.type)
-                            : [prop.items?.type];
+                        // Use itemsSchema (NOT prop.items)
+                        const items = itemsSchema || {};
+                        const itemTypes = Array.isArray(items.anyOf)
+                            ? items.anyOf.map((t) => t.type).filter(Boolean)
+                            : [items.type].filter(Boolean);
 
                         let input;
-
                         if (
                             itemTypes.includes("number") ||
                             itemTypes.includes("integer")
@@ -4548,7 +4628,6 @@ async function testTool(toolId) {
                             arrayContainer.removeChild(wrapper);
                         });
 
-                        // only append if not boolean (boolean branch already appended input above)
                         if (!itemTypes.includes("boolean")) {
                             wrapper.appendChild(input);
                         }
@@ -4566,20 +4645,19 @@ async function testTool(toolId) {
                         arrayContainer.appendChild(createArrayInput());
                     });
 
-                    if (Array.isArray(prop.default)) {
-                        if (prop.default.length > 0) {
-                            prop.default.forEach((val) => {
-                                arrayContainer.appendChild(
-                                    createArrayInput(val),
-                                );
-                            });
-                        } else {
-                            // Create one empty input for empty default arrays
-                            arrayContainer.appendChild(createArrayInput());
-                        }
-                    } else {
+                    // Seed rows:
+                    if (
+                        Array.isArray(prop.default) &&
+                        prop.default.length > 0
+                    ) {
+                        prop.default.forEach((val) =>
+                            arrayContainer.appendChild(createArrayInput(val)),
+                        );
+                    } else if (!isNullable) {
+                        // Non-nullable: start with one empty row
                         arrayContainer.appendChild(createArrayInput());
                     }
+                    // Nullable + default null/undefined → start with zero rows (button still shown)
 
                     fieldDiv.appendChild(arrayContainer);
                     fieldDiv.appendChild(addBtn);
