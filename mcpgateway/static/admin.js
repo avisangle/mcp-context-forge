@@ -5310,6 +5310,7 @@ async function testTool(toolId) {
                             arrayContainer.removeChild(wrapper);
                         });
 
+                        // only append if not boolean (boolean branch already appended input above)
                         if (!itemTypes.includes("boolean")) {
                             wrapper.appendChild(input);
                         }
