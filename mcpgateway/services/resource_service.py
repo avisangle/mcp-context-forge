@@ -50,7 +50,6 @@ from mcpgateway.observability import create_span
 from mcpgateway.schemas import ResourceCreate, ResourceMetrics, ResourceRead, ResourceSubscription, ResourceUpdate, TopPerformer
 from mcpgateway.services.logging_service import LoggingService
 from mcpgateway.utils.metrics_common import build_top_performers
-from mcpgateway.utils.sqlalchemy_modifier import json_contains_expr
 
 # Plugin support imports (conditional)
 try:
@@ -388,10 +387,6 @@ class ResourceService:
 
             With tags filter:
             >>> db2 = MagicMock()
-            >>> bind = MagicMock()
-            >>> bind.dialect = MagicMock()
-            >>> bind.dialect.name = "sqlite"           # or "postgresql" / "mysql"
-            >>> db2.get_bind.return_value = bind
             >>> db2.execute.return_value.scalars.return_value.all.return_value = [MagicMock()]
             >>> result2 = asyncio.run(service.list_resources(db2, tags=['api']))
             >>> isinstance(result2, list)
@@ -406,7 +401,7 @@ class ResourceService:
             # Filter resources that have any of the specified tags
             tag_conditions = []
             for tag in tags:
-                tag_conditions.append(json_contains_expr(db, DbResource.tags, tag))
+                tag_conditions.append(func.json_contains(DbResource.tags, f'"{tag}"'))
             if tag_conditions:
                 query = query.where(*tag_conditions)
 
